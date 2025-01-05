@@ -1,0 +1,11 @@
+numpy
+pandas
+opencv-python
+matplotlib
+tensorflow
+torch
+transformers
+librosa
+spacy
+sentencepiece
+tqdm
