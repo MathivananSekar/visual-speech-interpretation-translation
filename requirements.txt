@@ -9,3 +9,4 @@ librosa
 spacy
 sentencepiece
 tqdm
+pydub
