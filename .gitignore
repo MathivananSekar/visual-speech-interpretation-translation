@@ -2,3 +2,5 @@
 vsr-nlp-env
 data/datasets/*
 data/datasets/**
+data/*
+data/**

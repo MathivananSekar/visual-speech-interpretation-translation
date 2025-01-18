@@ -1,6 +1,8 @@
 numpy
 pandas
-opencv-python
+opencv-python # for reading and writing video frames
+dlib #for face detection
+face-recognition #Python wrapper around dlib
 opencv-python-headless
 matplotlib
 tensorflow
