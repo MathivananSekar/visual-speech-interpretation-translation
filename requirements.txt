@@ -1,9 +1,13 @@
 numpy
 pandas
 opencv-python
+opencv-python-headless
 matplotlib
 tensorflow
 torch
+torchvision
+torchaudio
+mediapipe
 transformers
 librosa
 spacy
