@@ -1,5 +1,6 @@
 import os
 import glob
+import json
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
@@ -17,7 +18,7 @@ def lipreading_collate_fn(batch):
     frames_list, token_ids_list = zip(*batch)
     
     # Find the maximum temporal size
-    max_frames = max([frames.shape[1] for frames in frames_list])
+    max_frames = max(frames.shape[1] for frames in frames_list)
 
     # Pad all tensors to have the same temporal size
     padded_frames_list = [
@@ -34,9 +35,9 @@ def lipreading_collate_fn(batch):
     max_len = max(lengths)
     batch_size = len(token_ids_list)
 
-    # We fill with pad_id
-    # We'll assume the Vocab pad_id is 0 if not set. Adapt as needed.
+    # Default pad_id to 0 unless we find otherwise in the dataset’s vocab
     pad_id = 0
+    # Try to look for vocab.pad_id if available
     if hasattr(batch[0][1], 'vocab') and batch[0][1].vocab.pad_id is not None:
         pad_id = batch[0][1].vocab.pad_id
 
@@ -61,15 +62,12 @@ def create_dataloader(
     and wraps it in a DataLoader with a custom collate_fn.
     """
     # Build data_list
-    # We look for all *_cropped.npy in processed_dir,
-    # and expect a matching *_transcript.txt
     print(f"Scanning {processed_dir} for data files...")
     npy_files = glob.glob(os.path.join(processed_dir, "*_cropped.npy"))
     data_list = []
     for npy_file in npy_files:
         print(f"Found {npy_file}")
         base_name = os.path.splitext(os.path.basename(npy_file))[0]  # e.g. "vid1_cropped"
-        # transcript file might be "vid1_transcript.txt" if that’s your naming
         txt_name = base_name.replace("_cropped", "_transcript") + ".txt"
         txt_file = os.path.join(processed_dir, txt_name)
         if os.path.exists(txt_file):
@@ -94,34 +92,26 @@ def create_dataloader(
 
     return dataloader
 
-if __name__ == "__main__":
-    # Example usage
-    # Suppose we built a vocab with some dummy tokens
-    tokens = ["place", "blue", "at", "red", "green", "two", "one"]
+def load_vocab_from_json(json_path):
+    """
+    Load a dictionary from a JSON file {word: index, ...}, then
+    build a Vocab object with sorted tokens in index order.
+    """
+    with open(json_path, "r") as f:
+        word_dict = json.load(f)
+
+    # Sort by index to ensure tokens align with their given indices
+    sorted_items = sorted(word_dict.items(), key=lambda x: x[1])
+    tokens = [word for word, idx in sorted_items]
+
+    # Define any special tokens (if you want them appended or separate).
+    # You may have to adjust their indices if you require them to match certain IDs.
     specials = {
         "pad": "<pad>",
         "unk": "<unk>",
         "sos": "<sos>",
         "eos": "<eos>"
     }
+
     vocab = Vocab(tokens=tokens, specials=specials)
-    
-    base_path = "data"
-    speaker_id = "s1"
-    # Path to the directory with processed .npy + .txt
-    processed_dir = os.path.join(base_path, "processed", speaker_id)
-    
-    loader = create_dataloader(
-        processed_dir=processed_dir,
-        vocab=vocab,
-        batch_size=2,
-        shuffle=False
-    )
-    
-    for batch_idx, (videos, texts, lengths) in enumerate(loader):
-        print(f"Batch {batch_idx}:")
-        print(" - videos shape:", videos.shape)  # (B, C, T, H, W)
-        print(" - texts shape:", texts.shape)    # (B, max_len)
-        print(" - lengths:", lengths)            # list of actual seq lengths
-        # Here you would feed (videos, texts) into your model
-        break
+    return vocab

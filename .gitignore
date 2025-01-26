@@ -13,3 +13,5 @@ src/data/__pycache__/data_loader.cpython-310.pyc
 experiments/checkpoints/lipreading_transformer_epoch1.pt
 experiments/checkpoints/lipreading_transformer_epoch2.pt
 experiments/checkpoints/lipreading_transformer_epoch3.pt
+src/data/__pycache__/data_loader.cpython-310.pyc
+src/training/__pycache__/train_lipreading.cpython-310.pyc

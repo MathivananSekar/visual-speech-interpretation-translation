@@ -4,8 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from src.data.data_loader import create_dataloader 
-from src.data.vocab import Vocab
+from src.data.data_loader import create_dataloader,load_vocab_from_json
 from src.models.transformer import LipReading3DTransformer
 
 ###############################################################################
@@ -52,22 +51,14 @@ def train_lipreading_model():
     os.makedirs(cfg.save_dir, exist_ok=True)
 
     # -------------------------------------------------------------------------
-    # 2.1 Build / Load Vocabulary
+    # 2.1 Load Vocabulary from JSON
     # -------------------------------------------------------------------------
-    # In practice, you'd build a vocab from your entire corpus.
-    # For a quick example, let's define a small vocab with some words + specials.
-    tokens = ["place", "blue", "at", "red", "green", "two", "one", "please"]
-    specials = {
-        "pad": "<pad>",
-        "unk": "<unk>",
-        "sos": "<sos>",
-        "eos": "<eos>"
-    }
-    vocab = Vocab(tokens=tokens, specials=specials)
+    vocab_json_path = os.path.join(cfg.base_path,"raw",cfg.speaker_id,"word_to_idx.json")
+    vocab = load_vocab_from_json(vocab_json_path)
     
     # Update config.vocab_size to match actual size
     cfg.vocab_size = len(vocab)
-    print(f"Vocab size: {cfg.vocab_size}")
+    print(f"Loaded vocab of size: {cfg.vocab_size}")
 
     # -------------------------------------------------------------------------
     # 2.2 Create DataLoaders (train + optional val)
