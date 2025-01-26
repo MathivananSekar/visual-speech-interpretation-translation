@@ -4,7 +4,7 @@ import torch.nn as nn
 from src.training.metrics import compute_wer, compute_cer
 from src.data.vocab import Vocab
 from src.models.transformer import LipReading3DTransformer
-from src.data.data_loader import create_dataloader
+from src.data.data_loader import create_dataloader,load_vocab_from_json
 from src.training.validation import ValidateConfig
 
 
@@ -64,18 +64,15 @@ def validate_with_wer_cer(model, val_loader, cfg, vocab):
 
 
 if __name__ == "__main__":
-    # Load vocabulary
-    tokens = ["place", "blue", "at", "red", "green", "two", "one", "please"]
-    specials = {
-        "pad": "<pad>",
-        "unk": "<unk>",
-        "sos": "<sos>",
-        "eos": "<eos>"
-    }
-    vocab = Vocab(tokens=tokens, specials=specials)
+   
+
     base_path = "data"
     speaker_id = "s1"
     processed_dir = os.path.join(base_path, "processed", speaker_id)
+     # Load vocabulary
+    vocab_json_path = os.path.join(base_path,"raw",speaker_id,"word_to_idx.json")
+    vocab = load_vocab_from_json(vocab_json_path)
+
     # Create validation DataLoader
     val_loader = create_dataloader(
         processed_dir=processed_dir,
@@ -97,7 +94,7 @@ if __name__ == "__main__":
         dropout=0.1
     ).to("cuda" if torch.cuda.is_available() else "cpu")
 
-    checkpoint_path = "experiments/checkpoints/lipreading_transformer_epoch3.pt"
+    checkpoint_path = "experiments/checkpoints/lipreading_transformer_epoch6.pt"
     checkpoint = torch.load(checkpoint_path, map_location="cuda" if torch.cuda.is_available() else "cpu")
     model.load_state_dict(checkpoint["model_state_dict"])
 
