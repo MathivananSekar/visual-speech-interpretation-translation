@@ -44,7 +44,7 @@ class TrainConfig:
 # 2. Training Script
 ###############################################################################
 
-def train_lipreading_model():
+def train_lipreading_model(resume_checkpoint=None):
     cfg = TrainConfig()
 
     # Ensure checkpoint directory exists
@@ -102,10 +102,27 @@ def train_lipreading_model():
     pad_id = vocab.pad_id if vocab.pad_id is not None else 0
     criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
 
+# -------------------------------------------------------------------------
+    # 3) If resume_checkpoint is provided, load model & optimizer states
+    # -------------------------------------------------------------------------
+    start_epoch = 0
+    if resume_checkpoint is not None:
+        print(f"Resuming from checkpoint: {resume_checkpoint}")
+        checkpoint = torch.load(resume_checkpoint, map_location=cfg.device)
+        
+        # Load model and optimizer state_dict
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        # Optionally read the last epoch number (so we can continue)
+        # Note that if checkpoint['epoch'] = 3, it means training completed 3 epochs
+        start_epoch = checkpoint['epoch']
+        print(f"Resuming training at epoch {start_epoch + 1}")
+
     # -------------------------------------------------------------------------
     # 2.4 Training Loop
     # -------------------------------------------------------------------------
-    for epoch in range(cfg.num_epochs):
+    for epoch in range(start_epoch, start_epoch + cfg.num_epochs):
         model.train()
         epoch_loss = 0.0
         start_time = time.time()
@@ -150,7 +167,8 @@ def train_lipreading_model():
             if (batch_idx + 1) % cfg.print_interval == 0:
                 avg_loss = epoch_loss / (batch_idx + 1)
                 elapsed = time.time() - start_time
-                print(f"Epoch [{epoch+1}/{cfg.num_epochs}], "
+                current_epoch = epoch + 1  # for display
+                print(f"Epoch [{current_epoch}/{start_epoch + cfg.num_epochs}], "
                       f"Step [{batch_idx+1}/{len(train_loader)}], "
                       f"Loss: {avg_loss:.4f}, Time: {elapsed:.2f}s")
 
@@ -205,4 +223,11 @@ def evaluate(model, val_loader, criterion, cfg):
 ###############################################################################
 
 if __name__ == "__main__":
-    train_lipreading_model()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--resume_checkpoint", type=str, default=None,
+                        help="Path to a checkpoint to resume training from.")
+    args = parser.parse_args()
+
+    train_lipreading_model(resume_checkpoint=args.resume_checkpoint)
