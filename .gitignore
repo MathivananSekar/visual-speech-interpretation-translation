@@ -4,3 +4,9 @@ data/datasets/*
 data/datasets/**
 data/*
 data/**
+experiments/**
+src/**/__pycache__/**
+src/**/*.pyc
+src/training/__pycache__/train_lipreading.cpython-310.pyc
+src/models/__pycache__/backbones.cpython-310.pyc
+src/data/__pycache__/data_loader.cpython-310.pyc

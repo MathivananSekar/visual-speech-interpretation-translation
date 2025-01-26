@@ -57,7 +57,7 @@ def get_mouth_bbox(face_landmarks):
     margin = 10  # Add some extra margin around the lips
     return (x_min - margin, y_min - margin, x_max + margin, y_max + margin)
 
-def crop_video_to_mouth_array(video_path, desired_size=(112,112)):
+def crop_video_to_mouth_array(video_path, desired_size=(64,64)):
     """
     1) Detect mouth bbox in the first frame (assuming fairly static posture in GRID).
     2) For each frame, crop mouth region, resize, and store in a list.
@@ -151,7 +151,7 @@ def main():
         transcript = parse_alignment_file(align_path)
         
         # Process video -> mouth array
-        frames_array = crop_video_to_mouth_array(vid_path, desired_size=(112,112))
+        frames_array = crop_video_to_mouth_array(vid_path, desired_size=(64,64))
         if frames_array is None:
             print(f"Skipping {vid_path} due to empty frames array.")
             continue

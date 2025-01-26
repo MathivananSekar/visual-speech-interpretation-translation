@@ -23,23 +23,23 @@ class TrainConfig:
 
     # Model / Architecture
     vocab_size = 50      # set this properly once you build your vocab
-    d_model = 256
-    nhead = 4
-    num_encoder_layers = 4
-    num_decoder_layers = 4
-    dim_feedforward = 1024
+    d_model = 128
+    nhead = 2
+    num_encoder_layers = 2
+    num_decoder_layers = 2
+    dim_feedforward = 256
     dropout = 0.1
 
     # Training
-    num_epochs = 10
+    num_epochs = 3
     learning_rate = 1e-4
     weight_decay = 1e-5
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Checkpointing / Logging
-    save_dir = "../../experiments/checkpoints"
+    save_dir = "experiments/checkpoints"
     save_prefix = "lipreading_transformer"
-    print_interval = 10  # how often to print training progress
+    print_interval = 5  # how often to print training progress
 
 ###############################################################################
 # 2. Training Script
