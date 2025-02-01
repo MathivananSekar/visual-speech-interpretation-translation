@@ -92,6 +92,52 @@ def create_dataloader(
 
     return dataloader
 
+
+def gather_all_speakers_data(speaker_ids, base_path, vocab, batch_size, shuffle=True, num_workers=0):
+    """
+    For each speaker in speaker_ids, call create_dataloader(...) 
+    to gather its data_list. Then combine them all into one dataset+loader.
+    """
+    from src.data.dataset import LipReadingDataset
+    from torch.utils.data import DataLoader
+    import glob
+    import os
+
+    combined_data_list = []
+
+    # For each speaker, gather the .npy/.txt pairs
+    for spk in speaker_ids:
+        processed_dir_spk = os.path.join(base_path, "processed", spk)
+        npy_files = glob.glob(os.path.join(processed_dir_spk, "*_cropped.npy"))
+        for npy_file in npy_files:
+            base_name = os.path.splitext(os.path.basename(npy_file))[0]
+            txt_name = base_name.replace("_cropped", "_transcript") + ".txt"
+            txt_file = os.path.join(processed_dir_spk, txt_name)
+            if os.path.exists(txt_file):
+                combined_data_list.append((npy_file, txt_file))
+
+    print(f"Total samples across all speakers: {len(combined_data_list)}")
+
+    # Create a single dataset
+    dataset = LipReadingDataset(
+        data_list=combined_data_list,
+        vocab=vocab,
+        add_sos_eos=True,
+        transform=None
+    )
+
+    # Create a single DataLoader from the combined dataset
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        collate_fn=lipreading_collate_fn
+    )
+
+    return loader
+
+
 def load_vocab_from_json(json_path):
     """
     Load a dictionary from a JSON file {word: index, ...}, then

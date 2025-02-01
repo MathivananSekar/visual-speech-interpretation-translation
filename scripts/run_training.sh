@@ -1,0 +1,1 @@
+python -m src.utils.word_to_idx

@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from src.data.data_loader import create_dataloader,load_vocab_from_json
+from src.data.data_loader import gather_all_speakers_data,load_vocab_from_json
 from src.models.transformer import LipReading3DTransformer
 
 ###############################################################################
@@ -14,9 +14,7 @@ from src.models.transformer import LipReading3DTransformer
 class TrainConfig:
     # Data
     base_path = "data"
-    speaker_id = "s1"
-    # Path to the directory with processed .npy + .txt
-    processed_dir = os.path.join(base_path, "processed", speaker_id)
+    speaker_ids = ["s1", "s2", "s3", "s4", "s5"]
     batch_size = 2
     num_workers = 0  # set >0 if you want parallel data loading
 
@@ -38,7 +36,7 @@ class TrainConfig:
     # Checkpointing / Logging
     save_dir = "experiments/checkpoints"
     save_prefix = "lipreading_transformer"
-    print_interval = 5  # how often to print training progress
+    print_interval = 10  # how often to print training progress
 
 ###############################################################################
 # 2. Training Script
@@ -53,7 +51,7 @@ def train_lipreading_model(resume_checkpoint=None):
     # -------------------------------------------------------------------------
     # 2.1 Load Vocabulary from JSON
     # -------------------------------------------------------------------------
-    vocab_json_path = os.path.join(cfg.base_path,"raw",cfg.speaker_id,"word_to_idx.json")
+    vocab_json_path = os.path.join(cfg.base_path,"raw","word_to_idx.json")
     vocab = load_vocab_from_json(vocab_json_path)
     
     # Update config.vocab_size to match actual size
@@ -63,12 +61,12 @@ def train_lipreading_model(resume_checkpoint=None):
     # -------------------------------------------------------------------------
     # 2.2 Create DataLoaders (train + optional val)
     # -------------------------------------------------------------------------
-    train_loader = create_dataloader(
-        processed_dir=cfg.processed_dir,
+    train_loader = gather_all_speakers_data(
+        speaker_ids=cfg.speaker_ids,
+        base_path=cfg.base_path,
         vocab=vocab,
         batch_size=cfg.batch_size,
         shuffle=True,
-        add_sos_eos=True,
         num_workers=cfg.num_workers
     )
 

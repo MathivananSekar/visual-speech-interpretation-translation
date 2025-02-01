@@ -111,7 +111,7 @@ class LipReading3DTransformer(nn.Module):
         tgt_tokens: [B, L] (the input token IDs for teacher-forcing)
         Returns: [B, L, vocab_size] (logits over the vocabulary)
         """
-        # Encode the video
+        # Encode the videos
         memory = self.encode_video(video_frames)  # [T', B, d_model]
         
         # Decode the text
