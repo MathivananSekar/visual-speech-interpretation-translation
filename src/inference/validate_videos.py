@@ -3,6 +3,7 @@ import glob
 import argparse
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
 
 from src.models.transformer import LipReading3DTransformer
 from src.data.data_loader import load_vocab_from_json
@@ -123,6 +124,10 @@ def validate_videos(args):
     total_cer = 0.0
     total_samples = 0
 
+    wer_list = []
+    cer_list = []
+    video_names = []
+
     for video_path in video_paths:
         base_name = os.path.splitext(os.path.basename(video_path))[0]
         align_path = os.path.join(args.align_dir, base_name + ".align")
@@ -159,6 +164,10 @@ def validate_videos(args):
         total_cer += sample_cer
         total_samples += 1
 
+        wer_list.append(sample_wer * 100)  # Store WER as percentage
+        cer_list.append(sample_cer * 100)  # Store CER as percentage
+        video_names.append(base_name)
+
         print(f"\nVideo: {base_name}")
         print(f" Ref: {ref_text}")
         print(f" Hyp: {hyp_text}")
@@ -174,6 +183,18 @@ def validate_videos(args):
     print("\n==========================================")
     print(f"Validation Complete over {total_samples} videos.")
     print(f"Avg WER: {avg_wer:.2f}%, Avg CER: {avg_cer:.2f}%")
+
+    # Plot WER and CER
+    plt.figure(figsize=(12, 6))
+    plt.plot(video_names, wer_list, label='WER', marker='o')
+    plt.plot(video_names, cer_list, label='CER', marker='x')
+    plt.xlabel('Video')
+    plt.ylabel('Error Rate (%)')
+    plt.title('WER and CER for Each Video')
+    plt.legend()
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.show()
 
 ##############################################################################
 # 5. Entry Point
