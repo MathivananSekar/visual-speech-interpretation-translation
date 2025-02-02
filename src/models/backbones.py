@@ -1,68 +1,92 @@
+import torch
 import torch.nn as nn
+import torchvision.models as models
 import torch.nn.functional as F
-from torchvision.models.video import r3d_18
 
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
+from torch.nn import TransformerDecoder, TransformerDecoderLayer
 
-class SpatioTemporalResNet(nn.Module):
-    """
-    Uses torchvision's 3D ResNet (r3d_18) as a backbone.
-    We'll remove the final FC layer so we can extract spatiotemporal features.
-    By default, r3d_18 outputs [B, 512] after pooling. 
-    We will adapt it to keep a sequence dimension if possible.
-    """
-    def __init__(self, return_sequence=True):
-        super(SpatioTemporalResNet, self).__init__()
-        
-        # Load a 3D ResNet-18 model
-        base_model = r3d_18(pretrained=False)
-        
-        # Extract components from the base model
-        # This includes conv1, bn1, relu, maxpool
-        self.stem = base_model.stem
+class LipReadingModel(nn.Module):
+    def __init__(self, num_classes, vocab_size, hidden_dim=256, nhead=4, num_encoder_layers=4, num_decoder_layers=2):
+        super().__init__()
+        self.num_classes = num_classes
+        self.vocab_size = vocab_size
+        self.hidden_dim = hidden_dim
 
-        self.layer1 = base_model.layer1
-        self.layer2 = base_model.layer2
-        self.layer3 = base_model.layer3
-        self.layer4 = base_model.layer4
-        
-        # We can keep the final pooling or adapt it 
-        # depending on whether we want a single vector or a sequence.
-        # If return_sequence=False, we do global spatiotemporal pooling -> [B, 512]
-        # If return_sequence=True, we might keep temporal dimension, 
-        # but that requires custom modifications. 
-        # For simplicity, let's do global *spatial* pool but keep time dimension.
-        
-        self.return_sequence = return_sequence
-        self.avgpool = nn.AdaptiveAvgPool3d((None, 1, 1))  
-        # (None, 1, 1) means we keep the temporal dimension but pool over H and W
+        # 1) Pretrained ResNet for feature extraction (2D)
+        self.cnn = models.resnet18(pretrained=True)
+        self.cnn.fc = nn.Identity()  # remove classification layer -> output size 512
 
-    def forward(self, x):
+        # Project to desired hidden_dim
+        self.linear_in = nn.Linear(512, hidden_dim)
+
+        # 2) Transformer Encoder (temporal)
+        enc_layer = TransformerEncoderLayer(d_model=hidden_dim, nhead=nhead)
+        self.transformer_encoder = TransformerEncoder(enc_layer, num_layers=num_encoder_layers)
+
+        # 3) CTC Head
+        self.ctc_fc = nn.Linear(hidden_dim, num_classes)  # output for CTC
+
+        # 4) Attention-based Decoder
+        dec_layer = TransformerDecoderLayer(d_model=hidden_dim, nhead=nhead)
+        self.decoder = TransformerDecoder(dec_layer, num_layers=num_decoder_layers)
+
+        self.embedding = nn.Embedding(vocab_size, hidden_dim)
+        self.attn_fc = nn.Linear(hidden_dim, vocab_size)
+
+    def forward_encoder(self, x):
         """
-        x shape expected: [B, C, T, H, W]
-        returns:
-          if return_sequence=True -> [B, feat_dim, T] (i.e. a feature for each time step)
-          if return_sequence=False -> [B, feat_dim]
+        x: (B, T, 3, 64, 128)
+        Returns encoder_out: (T, B, hidden_dim)
         """
-        # Pass through 3D ResNet layers
-        x = self.stem(x)      # [B, 64, T/2, H/2, W/2] typically
-        x = self.layer1(x)    # e.g. [B, 64, T/2, H/2, W/2]
-        x = self.layer2(x)    # e.g. [B, 128, T/4, H/4, W/4]
-        x = self.layer3(x)    # e.g. [B, 256, T/8, H/8, W/8]
-        x = self.layer4(x)    # e.g. [B, 512, T/8, H/8, W/8]
-        
-        # Pool over spatial dims, keep time
-        x = self.avgpool(x)   # shape [B, 512, T/8, 1, 1]
-        
-        # Now we have [B, 512, T'], where T' ~ T/8 
-        # (depends on how the conv blocks subsample the time dimension)
-        if self.return_sequence:
-            # Flatten to [B, 512, T']
-            x = x.squeeze(-1).squeeze(-1)  # remove H,W dims -> [B, 512, T']
-            # Transpose to [B, T', 512]
-            x = x.transpose(1, 2)  # [B, T', 512]
-        else:
-            # Global pool over time as well
-            x = F.adaptive_avg_pool1d(x.squeeze(-1).squeeze(-1), 1)  # [B, 512, 1]
-            x = x.squeeze(-1)  # [B, 512]
-        
-        return x
+        B, T, C, H, W = x.shape
+
+        # (a) Flatten so we can pass each frame through ResNet
+        x = x.view(B*T, C, H, W)
+        feats = self.cnn(x)   # (B*T, 512)
+        feats = self.linear_in(feats)  # (B*T, hidden_dim)
+
+        # (b) Reshape to (B, T, hidden_dim), then permute for transformer
+        feats = feats.view(B, T, self.hidden_dim)  # (B, T, hidden_dim)
+        feats = feats.permute(1, 0, 2)  # (T, B, hidden_dim)
+
+        # (c) Pass through transformer encoder
+        memory = self.transformer_encoder(feats)  # (T, B, hidden_dim)
+        return memory
+
+    def forward_ctc(self, encoder_out):
+        """
+        encoder_out: (T, B, hidden_dim)
+        -> ctc_logits: (B, T, num_classes)
+        """
+        x = encoder_out.permute(1, 0, 2)  # (B, T, hidden_dim)
+        return self.ctc_fc(x)            # (B, T, num_classes)
+
+    def forward_decoder(self, encoder_out, tgt_tokens):
+        """
+        encoder_out: (T, B, hidden_dim)
+        tgt_tokens:  (B, U)
+        Returns: (B, U, vocab_size)
+        """
+        B, U = tgt_tokens.shape
+        # embed target
+        tgt_emb = self.embedding(tgt_tokens)  # (B, U, hidden_dim)
+        tgt_emb = tgt_emb.permute(1, 0, 2)    # (U, B, hidden_dim)
+
+        # decode
+        dec_out = self.decoder(tgt_emb, encoder_out)  # (U, B, hidden_dim)
+
+        # project to vocab
+        dec_out = dec_out.permute(1, 0, 2)    # (B, U, hidden_dim)
+        logits = self.attn_fc(dec_out)        # (B, U, vocab_size)
+        return logits
+
+    def forward(self, x, tgt_tokens=None):
+        # x: (B, T, 3, 64, 128)
+        # tgt_tokens: (B, U) or None
+        encoder_out = self.forward_encoder(x)
+        ctc_logits  = self.forward_ctc(encoder_out)
+        attn_logits = None
+        if tgt_tokens is not None:
+            attn_logits = self.forward_decoder(encoder_out, tgt_tokens)
+        return ctc_logits, attn_logits

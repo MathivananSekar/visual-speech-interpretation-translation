@@ -3,11 +3,91 @@ import glob
 import argparse
 import torch
 import numpy as np
-
+import torch.nn.functional as F
 from src.models.transformer import LipReading3DTransformer
 from src.data.data_loader import load_vocab_from_json
 from src.utils.detect_utils import crop_video_to_mouth_array
 from src.training.metrics import compute_wer, compute_cer  # Adjust import to your project structure
+
+def beam_decode(model, frames_tensor, vocab, beam_size=5, max_len=100):
+    """
+    Beam search decoding for a transformer-based lipreading model.
+    
+    Args:
+        model: The trained LipReading3DTransformer.
+        frames_tensor: Input tensor of shape [B, C, T, H, W] (assuming B=1).
+        vocab: Vocabulary object with attributes: sos_id, eos_id, pad_id, and a method id_to_token.
+        beam_size: The number of beams to keep at each step.
+        max_len: Maximum decoding length.
+        
+    Returns:
+        best_seq: The best decoded sequence (list of token IDs).
+    """
+    sos_id = vocab.sos_id
+    eos_id = vocab.eos_id
+    device = frames_tensor.device
+
+    model.eval()
+    with torch.no_grad():
+        # Encode the video frames to obtain visual memory.
+        # memory shape: [T', B, d_model] (assume B = 1)
+        memory = model.encode_video(frames_tensor)
+
+    # Initialize beam list with one beam: ([sos_id], cumulative_log_prob)
+    beams = [([sos_id], 0.0)]
+    
+    for step in range(max_len):
+        new_beams = []
+        for seq, cum_log_prob in beams:
+            # If the sequence already ended with <eos>, carry it forward unchanged.
+            if seq[-1] == eos_id:
+                new_beams.append((seq, cum_log_prob))
+                continue
+
+            # Prepare decoder input (shape: [1, L]) from the current sequence.
+            decoder_input = torch.tensor([seq], dtype=torch.long, device=device)
+            
+            with torch.no_grad():
+                # Get decoder output: shape [B, L, vocab_size]
+                decoder_output = model.decode_text(decoder_input, memory)
+            # Take logits of the last token in the sequence.
+            next_logits = decoder_output[:, -1, :]  # shape [1, vocab_size]
+            
+            # Convert logits to log-probabilities.
+            log_probs = F.log_softmax(next_logits, dim=-1)  # shape [1, vocab_size]
+            log_probs = log_probs.squeeze(0)  # shape [vocab_size]
+            
+            # Get top beam_size tokens and their log-probabilities.
+            topk_log_probs, topk_indices = torch.topk(log_probs, beam_size)
+            
+            # Expand each beam candidate.
+            for i in range(beam_size):
+                token = topk_indices[i].item()
+                new_seq = seq + [token]
+                new_cum_log_prob = cum_log_prob + topk_log_probs[i].item()
+                new_beams.append((new_seq, new_cum_log_prob))
+        
+        # Keep only the top beam_size beams (sorted by cumulative log probability in descending order).
+        beams = sorted(new_beams, key=lambda x: x[1], reverse=True)[:beam_size]
+        
+        # If all beams end with <eos>, stop early.
+        if all(seq[-1] == eos_id for seq, _ in beams):
+            break
+
+    # Choose the best beam (with highest cumulative log probability).
+    best_seq, best_score = beams[0]
+    return best_seq
+
+def tokens_to_string(token_ids, vocab):
+    """
+    Convert token IDs to text, skipping special tokens (<sos>, <eos>, <pad>).
+    Adjust the join method based on whether tokens represent words (use " ".join)
+    or characters (use "".join).
+    """
+    special_ids = {vocab.sos_id, vocab.eos_id, vocab.pad_id}
+    words = [vocab.id_to_token(tid) for tid in token_ids if tid not in special_ids]
+    return " ".join(words)
+
 
 ##############################################################################
 # 1. Helper: Parse alignment file to get reference text
@@ -135,7 +215,7 @@ def validate_videos(args):
         ref_text = parse_alignment_file(align_path)
 
         # Preprocess video
-        frames_array = crop_video_to_mouth_array(video_path, desired_size=(64,64))
+        frames_array = crop_video_to_mouth_array(video_path, desired_size=(112,112))
         if frames_array is None:
             print(f"[WARN] Could not crop {video_path}, skipping.")
             continue
@@ -146,14 +226,15 @@ def validate_videos(args):
 
         # Inference
         with torch.no_grad():
-            pred_ids_batch = greedy_decode(model, frames_tensor, vocab, max_len=100)
-        pred_ids = pred_ids_batch[0]  # B=1
-        hyp_text = tokens_to_string(pred_ids, vocab)
+            predicted_token_ids = beam_decode(model, frames_tensor, vocab, beam_size=5, max_len=100)
+
+        predicted_text = tokens_to_string(predicted_token_ids, vocab)
+        print(f"Inference result for {os.path.basename(video_path)}:\n{predicted_text}")
 
         # Compute WER / CER
         # If your compute_wer/cers return fraction, multiply by 100 if you want percentage
-        sample_wer = compute_wer(ref_text, hyp_text)
-        sample_cer = compute_cer(ref_text, hyp_text)
+        sample_wer = compute_wer(ref_text, predicted_text)
+        sample_cer = compute_cer(ref_text, predicted_text)
 
         total_wer += sample_wer
         total_cer += sample_cer
@@ -161,7 +242,7 @@ def validate_videos(args):
 
         print(f"\nVideo: {base_name}")
         print(f" Ref: {ref_text}")
-        print(f" Hyp: {hyp_text}")
+        print(f" Hyp: {predicted_text}")
         print(f" WER: {sample_wer*100:.2f}%, CER: {sample_cer*100:.2f}%")
 
     # Final average

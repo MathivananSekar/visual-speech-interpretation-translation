@@ -2,8 +2,10 @@ import os
 import glob
 import json
 import torch
+import numpy as np
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
+
 from src.data.vocab import Vocab
 from src.data.dataset import LipReadingDataset
 
@@ -11,76 +13,54 @@ def lipreading_collate_fn(batch):
     """
     Custom collate function to handle:
       - Stacking video tensors: (B, C, T, H, W)
-      - Padding the text sequences to the same length
-    batch: list of (frames_tensor, token_ids)
+      - Padding the token (label) sequences to the same length.
+    Each item in batch is a tuple (frames, token_ids), where:
+      - frames is a tensor of shape (T, 3, 64, 128)
+      - token_ids is a list (or sequence) of token IDs (length T)
     """
-
     frames_list, token_ids_list = zip(*batch)
-    
-    # Find the maximum temporal size
-    max_frames = max(frames.shape[1] for frames in frames_list)
+    batch_size = len(frames_list)
 
-    # Pad all tensors to have the same temporal size
+    # Find the maximum temporal length (number of frames) in the batch.
+    # (Assuming each sample’s token_ids length equals its frame count.)
+    seq_lengths = [f.shape[0] for f in frames_list]  # raw frame counts for each sample
+    max_frames = max(seq_lengths)
+
+    # Pad frames: pad along the time dimension.
+    # Each frame tensor is of shape (T, 3, 64, 128); pad along T.
     padded_frames_list = [
-        F.pad(frames, (0, 0, 0, 0, 0, max_frames - frames.shape[1]))  # Pad along T
+        F.pad(frames, (0, 0, 0, 0, 0, max_frames - frames.shape[0])) 
         for frames in frames_list
     ]
+    # Stack into tensor with shape (B, T, 3, 64, 128)
+    frames_tensor = torch.stack(padded_frames_list, dim=0)
 
-    # 1. Stack frames (video data) into a single tensor
-    # Stack the tensors
-    frames_tensor = torch.stack(padded_frames_list, dim=0)  # shape (B, C, T, H, W)
-
-    # 2. Pad token sequences to same length
-    lengths = [len(seq) for seq in token_ids_list]
+    # Pad token sequences to the maximum length.
+    lengths = [len(seq) for seq in token_ids_list]  # these are the raw token counts
     max_len = max(lengths)
-    batch_size = len(token_ids_list)
-
-    # Default pad_id to 0 unless we find otherwise in the dataset’s vocab
-    pad_id = 0
-    # Try to look for vocab.pad_id if available
-    if hasattr(batch[0][1], 'vocab') and batch[0][1].vocab.pad_id is not None:
-        pad_id = batch[0][1].vocab.pad_id
-
-    text_batch = torch.full((batch_size, max_len), pad_id, dtype=torch.long)
+    text_batch = torch.full((batch_size, max_len), 0, dtype=torch.long)  # using 0 as pad_id
 
     for i, seq in enumerate(token_ids_list):
-        text_batch[i, :len(seq)] = seq
+        text_batch[i, :len(seq)] = torch.tensor(seq, dtype=torch.long)
 
-    return frames_tensor, text_batch, lengths
+    # Return the raw lengths as label_lengths and frame_lengths.
+    # (If each frame has one label, these are the same.)
+    frame_lengths = seq_lengths  # raw number of frames for each sample
+    label_lengths = lengths      # raw number of tokens for each sample
+
+    return frames_tensor, text_batch, frame_lengths, label_lengths
+
+
 
 def create_dataloader(
-    processed_dir,
+    data_dir,
     vocab,
     batch_size=2,
     shuffle=True,
     add_sos_eos=True,
     num_workers=0
 ):
-    """
-    Scans a directory of processed files (npy + txt),
-    builds a data_list, constructs a LipReadingDataset,
-    and wraps it in a DataLoader with a custom collate_fn.
-    """
-    # Build data_list
-    print(f"Scanning {processed_dir} for data files...")
-    npy_files = glob.glob(os.path.join(processed_dir, "*_cropped.npy"))
-    data_list = []
-    for npy_file in npy_files:
-        print(f"Found {npy_file}")
-        base_name = os.path.splitext(os.path.basename(npy_file))[0]  # e.g. "vid1_cropped"
-        txt_name = base_name.replace("_cropped", "_transcript") + ".txt"
-        txt_file = os.path.join(processed_dir, txt_name)
-        if os.path.exists(txt_file):
-            data_list.append((npy_file, txt_file))
-
-    print(f"Found {len(data_list)} samples in {processed_dir}")
-
-    dataset = LipReadingDataset(
-        data_list=data_list,
-        vocab=vocab,
-        add_sos_eos=add_sos_eos,
-        transform=None  # or your custom transform
-    )
+    dataset = LipReadingDataset(data_dir=data_dir, vocab=vocab)
 
     dataloader = DataLoader(
         dataset,
@@ -94,39 +74,38 @@ def create_dataloader(
 
 
 def gather_all_speakers_data(speaker_ids, base_path, vocab, batch_size, shuffle=True, num_workers=0):
-    """
-    For each speaker in speaker_ids, call create_dataloader(...) 
-    to gather its data_list. Then combine them all into one dataset+loader.
-    """
-    from src.data.dataset import LipReadingDataset
-    from torch.utils.data import DataLoader
-    import glob
-    import os
+    # Build a list of all .npz paths from each speaker subfolder
+    all_npz_paths = []
+    for spk_id in speaker_ids:
+        dir_spk = os.path.join(base_path, "processed", spk_id)
+        for f in os.listdir(dir_spk):
+            if f.endswith(".npz"):
+                all_npz_paths.append(os.path.join(dir_spk, f))
 
-    combined_data_list = []
+    # Create an "on-the-fly" dataset that can read these NPZs, or copy them into one folder
+    # Simplest: store them in memory, or define a single dataset class that accepts a list of paths
+    from torch.utils.data import Dataset
 
-    # For each speaker, gather the .npy/.txt pairs
-    for spk in speaker_ids:
-        processed_dir_spk = os.path.join(base_path, "processed", spk)
-        npy_files = glob.glob(os.path.join(processed_dir_spk, "*_cropped.npy"))
-        for npy_file in npy_files:
-            base_name = os.path.splitext(os.path.basename(npy_file))[0]
-            txt_name = base_name.replace("_cropped", "_transcript") + ".txt"
-            txt_file = os.path.join(processed_dir_spk, txt_name)
-            if os.path.exists(txt_file):
-                combined_data_list.append((npy_file, txt_file))
+    class CombinedLipreadingDataset(Dataset):
+        def __init__(self, npz_paths, vocab):
+            super().__init__()
+            self.npz_paths = npz_paths
+            self.vocab = vocab
 
-    print(f"Total samples across all speakers: {len(combined_data_list)}")
+        def __len__(self):
+            return len(self.npz_paths)
 
-    # Create a single dataset
-    dataset = LipReadingDataset(
-        data_list=combined_data_list,
-        vocab=vocab,
-        add_sos_eos=True,
-        transform=None
-    )
+        def __getitem__(self, idx):
+            npz_file = self.npz_paths[idx]
+            data = np.load(npz_file, allow_pickle=True)
+            frames = torch.tensor(data["frames"], dtype=torch.float32) / 255.0
+            frames = frames.permute(0, 3, 1, 2)  # (T,3,64,128)
+            labels_str = data["labels"]         # (T,) of strings
+            labels_idx = [self.vocab.get_index(w) for w in labels_str]
+            labels_idx = torch.tensor(labels_idx, dtype=torch.long)
+            return frames, labels_idx
 
-    # Create a single DataLoader from the combined dataset
+    dataset = CombinedLipreadingDataset(all_npz_paths, vocab)
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -134,14 +113,13 @@ def gather_all_speakers_data(speaker_ids, base_path, vocab, batch_size, shuffle=
         num_workers=num_workers,
         collate_fn=lipreading_collate_fn
     )
-
     return loader
 
 
 def load_vocab_from_json(json_path):
     """
-    Load a dictionary from a JSON file {word: index, ...}, then
-    build a Vocab object with sorted tokens in index order.
+    Load a dictionary from a JSON file {token: index, ...}, then
+    build a Vocab object with sorted tokens by index order.
     """
     with open(json_path, "r") as f:
         word_dict = json.load(f)
@@ -150,8 +128,7 @@ def load_vocab_from_json(json_path):
     sorted_items = sorted(word_dict.items(), key=lambda x: x[1])
     tokens = [word for word, idx in sorted_items]
 
-    # Define any special tokens (if you want them appended or separate).
-    # You may have to adjust their indices if you require them to match certain IDs.
+    # If you have special tokens, define them here
     specials = {
         "pad": "<pad>",
         "unk": "<unk>",
