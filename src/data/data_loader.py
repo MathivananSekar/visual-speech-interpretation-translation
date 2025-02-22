@@ -7,37 +7,36 @@ import torch.nn.functional as F
 from src.data.vocab import Vocab
 from src.data.dataset import LipReadingDataset
 
-def lipreading_collate_fn(batch):
+
+def lipreading_collate_fn(batch, pad_id=0):
     """
     Custom collate function to handle:
       - Stacking video tensors: (B, C, T, H, W)
       - Padding the text sequences to the same length
     batch: list of (frames_tensor, token_ids)
     """
-
     frames_list, token_ids_list = zip(*batch)
-    
-    # Find the maximum temporal size
-    max_frames = max(frames.shape[1] for frames in frames_list)
 
-    # Pad all tensors to have the same temporal size
-    padded_frames_list = [
-        F.pad(frames, (0, 0, 0, 0, 0, max_frames - frames.shape[1]))  # Pad along T
-        for frames in frames_list
-    ]
+    # Find the maximum temporal size and spatial dimensions (H, W)
+    max_frames = max(frames.shape[1] for frames in frames_list)
+    max_height = max(frames.shape[2] for frames in frames_list)
+    max_width = max(frames.shape[3] for frames in frames_list)
+
+    # Pad all tensors to have the same temporal size and spatial size
+    padded_frames_list = []
+    if all(frames.shape[2:] == frames_list[0].shape[2:] for frames in frames_list):
+        padded_frames_list = [F.pad(frames, (0, 0, 0, 0, 0, max_frames - frames.shape[1])) 
+                            for frames in frames_list]
 
     # 1. Stack frames (video data) into a single tensor
-    # Stack the tensors
     frames_tensor = torch.stack(padded_frames_list, dim=0)  # shape (B, C, T, H, W)
 
-    # 2. Pad token sequences to same length
+    # 2. Pad token sequences to the same length
     lengths = [len(seq) for seq in token_ids_list]
     max_len = max(lengths)
     batch_size = len(token_ids_list)
 
     # Default pad_id to 0 unless we find otherwise in the dataset’s vocab
-    pad_id = 0
-    # Try to look for vocab.pad_id if available
     if hasattr(batch[0][1], 'vocab') and batch[0][1].vocab.pad_id is not None:
         pad_id = batch[0][1].vocab.pad_id
 
@@ -46,12 +45,13 @@ def lipreading_collate_fn(batch):
     for i, seq in enumerate(token_ids_list):
         text_batch[i, :len(seq)] = seq
 
-    return frames_tensor, text_batch, lengths
+    return frames_tensor, text_batch, torch.tensor(lengths, dtype=torch.long)
+
 
 def create_dataloader(
     processed_dir,
     vocab,
-    batch_size=2,
+    batch_size=4,
     shuffle=True,
     add_sos_eos=True,
     num_workers=0
@@ -87,7 +87,7 @@ def create_dataloader(
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        collate_fn=lipreading_collate_fn
+        collate_fn=lambda b: lipreading_collate_fn(b, vocab.pad_id)
     )
 
     return dataloader
@@ -152,12 +152,7 @@ def load_vocab_from_json(json_path):
 
     # Define any special tokens (if you want them appended or separate).
     # You may have to adjust their indices if you require them to match certain IDs.
-    specials = {
-        "pad": "<pad>",
-        "unk": "<unk>",
-        "sos": "<sos>",
-        "eos": "<eos>"
-    }
+    specials = {'pad': '<pad>', 'unk': '<unk>', 'sos': '<sos>', 'eos': '<eos>', 'blank': '<blank>'}
 
     vocab = Vocab(tokens=tokens, specials=specials)
     return vocab

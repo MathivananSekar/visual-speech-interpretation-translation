@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import torch
+from torchvision import transforms
 from torch.utils.data import Dataset
 
 class LipReadingDataset(Dataset):
@@ -21,7 +22,11 @@ class LipReadingDataset(Dataset):
         self.data_list = data_list
         self.vocab = vocab
         self.add_sos_eos = add_sos_eos
-        self.transform = transform
+        self.transform = transform or transforms.Compose([
+            transforms.RandomCrop((100, 100)),  # Slightly smaller than 112x112
+            transforms.Resize((112, 112)),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2)
+        ])
 
     def __len__(self):
         return len(self.data_list)
@@ -33,12 +38,16 @@ class LipReadingDataset(Dataset):
         frames_array = np.load(video_path)  # dtype could be uint8 or float
         # Convert to float tensor, if needed
         frames_tensor = torch.from_numpy(frames_array).float()
+
+        if frames_tensor.max() > 1.0:  # Assuming uint8 input
+            frames_tensor /= 255.0
+        assert frames_tensor.shape[0] == 75, f"Expected 75 frames, got {frames_tensor.shape[0]}"
         # Transpose to [C, T, H, W] for PyTorch 3D CNN usage
         frames_tensor = frames_tensor.permute(3, 0, 1, 2)  # (C, T, H, W)
 
         # Apply any additional transform if desired
         if self.transform:
-            frames_tensor = self.transform(frames_tensor)
+            frames_tensor = torch.stack([self.transform(f) for f in frames_tensor.unbind(1)], dim=1)
 
         # Read transcript
         with open(transcript_path, 'r', encoding='utf-8') as f:

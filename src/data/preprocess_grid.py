@@ -3,7 +3,7 @@ import glob
 import cv2
 import numpy as np
 import argparse
-from src.utils.detect_utils import crop_video_to_mouth_array
+from src.utils.detect_utils import crop_video_to_mouth_array, parse_alignment_timestamps
 
 """
 Script to preprocess the GRID corpus:
@@ -73,11 +73,11 @@ def main():
             continue
         
         transcript = parse_alignment_file(align_path)
-        
+        alignments = parse_alignment_timestamps(align_path, audio_sample_rate=25000)
         # Process video -> mouth array
-        frames_array = crop_video_to_mouth_array(vid_path, desired_size=(112,112))
-        if frames_array is None:
-            print(f"Skipping {vid_path} due to empty frames array.")
+        frames_array = crop_video_to_mouth_array(vid_path, alignments=alignments)
+        if frames_array is None or frames_array.shape[1:] != (112, 112, 3):
+            print(f"Invalid output for {vid_path}: {frames_array.shape if frames_array is not None else 'None'}")
             continue
         
         # Save the .npy

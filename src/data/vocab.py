@@ -14,7 +14,7 @@ class Vocab:
         if tokens is None:
             tokens = []
         if specials is None:
-            specials = {}
+            specials = {'pad': '<pad>', 'unk': '<unk>', 'sos': '<sos>', 'eos': '<eos>', 'blank': '<blank>'}
 
         # Keep track of special tokens in a specific order so they get consistent IDs.
         self.special_tokens = []
