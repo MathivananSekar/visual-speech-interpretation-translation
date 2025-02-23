@@ -16,3 +16,4 @@ spacy
 sentencepiece
 tqdm
 pydub
+jiwer

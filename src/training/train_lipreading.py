@@ -12,9 +12,9 @@ from jiwer import wer
 
 class TrainConfig:
     base_path = "data"
-    speaker_ids = ["s1"]
+    speaker_ids = ["s1","s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10"]
     batch_size = 4
-    num_workers = 0
+    num_workers = 4
     vocab_size = 50
     d_model = 128
     nhead = 2
@@ -94,7 +94,10 @@ def train_lipreading_model(resume_checkpoint=None):
         speaker_ids=cfg.speaker_ids, base_path=cfg.base_path, vocab=vocab,
         batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers
     )
-    val_loader = train_loader  # Simplified; ideally split train/val sets
+    val_loader = gather_all_speakers_data(
+        speaker_ids=["s1"], base_path=cfg.base_path, vocab=vocab,
+        batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers
+    )
     
     model = LipReading3DTransformer(
         vocab_size=cfg.vocab_size, d_model=cfg.d_model, nhead=cfg.nhead,

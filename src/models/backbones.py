@@ -9,7 +9,19 @@ class SpatioTemporalResNet(nn.Module):
         self.stem = base_model.stem
         self.stem[0].stride = (1, 2, 2)  # Reduce temporal stride from 2 to 1
         self.layer1 = base_model.layer1
+        # Ensure layer1 preserves temporal dimension
+        for block in self.layer1:
+            block.conv1[0].stride = (1, 1, 1)
+            if block.downsample is not None:
+                block.downsample[0].stride = (1, 1, 1)  # Match residual path
+        
         self.layer2 = base_model.layer2
+        # Adjust layer2 to downsample T once (e.g., 75 → 38)
+        for block in self.layer2:
+            block.conv1[0].stride = (1, 2, 2)  # First block downsamples H, W
+            if block.downsample is not None:
+                block.downsample[0].stride = (1, 2, 2)  # Match residual path
+            break  # Only first block downsamples
         self.layer3 = base_model.layer3
         self.layer4 = base_model.layer4
         self.return_sequence = return_sequence
