@@ -1,11 +1,10 @@
 ./vsr-nlp-env/
 vsr-nlp-env
-data/datasets/*
-data/datasets/**
-data/*
-data/**
+data/
+data/raw/**
 experiments/**
 src/**/__pycache__/**
+**/__pycache__/**
 src/**/*.pyc
 src/training/__pycache__/train_lipreading.cpython-310.pyc
 src/models/__pycache__/backbones.cpython-310.pyc
