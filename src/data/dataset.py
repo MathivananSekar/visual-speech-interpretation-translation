@@ -6,55 +6,60 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 import torchvision.transforms.functional as F_t
 
-class ClipTransform:
+import random
+import torch
+import torchvision.transforms.functional as F_t
+
+class ClipAugmentTransform:
     """
-    Applies a single random crop to all frames in a clip, then
-    resizes, and applies mild color jitter to each frame consistently.
+    Apply the same random spatial + color transforms across all frames in a clip
+    to preserve mouth alignment.
     """
 
-    def __init__(self, crop_size=(100, 100), resize=(112, 112),
-                 brightness=0.05, contrast=0.05):
-        self.crop_size = crop_size
+    def __init__(self, resize=(112, 112),
+                 color_jitter=0.2,
+                 horizontal_flip_prob=0.5):
         self.resize = resize
-        self.brightness = brightness
-        self.contrast = contrast
+        self.color_jitter = color_jitter
+        self.hflip_prob = horizontal_flip_prob
 
     def __call__(self, clip):
         """
-        clip: Tensor of shape (C, T, H, W), with C=3 (RGB).
-        We will:
-            - pick one random crop region (top, left)
-            - apply it to each of the T frames
-            - resize to final size
-            - apply mild color jitter
+        clip: [C, T, H, W], with pixel values in [0,1].
         """
         C, T, H, W = clip.shape
-        crop_h, crop_w = self.crop_size
 
-        if H < crop_h or W < crop_w:
-            # Fallback: just center-crop if the random crop won't fit
-            top = max(0, (H - crop_h) // 2)
-            left = max(0, (W - crop_w) // 2)
-        else:
-            top = random.randint(0, H - crop_h)
-            left = random.randint(0, W - crop_w)
+        do_flip = (random.random() < self.hflip_prob)
+        # pick random brightness/contrast
+        brightness_factor = 1.0 + random.uniform(-self.color_jitter, self.color_jitter)
+        contrast_factor   = 1.0 + random.uniform(-self.color_jitter, self.color_jitter)
 
-        cropped_frames = []
+        # Possibly random crop if desired
+        # For example, random shift up to +/- 5 px
+        max_shift = 5
+        shift_h = random.randint(-max_shift, max_shift)
+        shift_w = random.randint(-max_shift, max_shift)
+
+        transformed_frames = []
         for t in range(T):
             frame = clip[:, t, :, :]  # shape [C, H, W]
-            # Crop
-            frame = frame[:, top:top+crop_h, left:left+crop_w]
+            # Horizontal flip
+            if do_flip:
+                frame = F_t.hflip(frame)
+            # Shift (pad + crop) if you want
+            frame = F_t.pad(frame, padding=max_shift, fill=0)
+            frame = frame[:, (max_shift+shift_h):(max_shift+shift_h+H),
+                             (max_shift+shift_w):(max_shift+shift_w+W)]
             # Resize
             frame = F_t.resize(frame, self.resize)
-            # Apply color jitter
-            frame = F_t.adjust_brightness(frame, 1.0 + random.uniform(-self.brightness, self.brightness))
-            frame = F_t.adjust_contrast(frame, 1.0 + random.uniform(-self.contrast, self.contrast))
+            # Color jitter
+            frame = F_t.adjust_brightness(frame, brightness_factor)
+            frame = F_t.adjust_contrast(frame, contrast_factor)
+            transformed_frames.append(frame.unsqueeze(1))
 
-            cropped_frames.append(frame.unsqueeze(1))  # shape [C, 1, newH, newW]
+        # Re-stack
+        return torch.cat(transformed_frames, dim=1)
 
-        # Re-stack along time dimension
-        transformed_clip = torch.cat(cropped_frames, dim=1)  # [C, T, newH, newW]
-        return transformed_clip
 
 
 class LipReadingDataset(Dataset):
@@ -75,7 +80,8 @@ class LipReadingDataset(Dataset):
         self.vocab = vocab
         self.add_sos_eos = add_sos_eos
         # By default, use the new ClipTransform
-        self.transform = transform if transform is not None else ClipTransform()
+        self.transform = ClipAugmentTransform(resize=(112,112), color_jitter=0.2, horizontal_flip_prob=0.5)
+
 
     def __len__(self):
         return len(self.data_list)
