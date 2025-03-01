@@ -297,37 +297,46 @@ def evaluate(model, val_loader, cfg, pad_id=0):
             decoder_target = texts[:, 1:]
 
             ctc_logits, attn_logits = model(videos, decoder_input)
-            # ctc
-            ctc_log_probs = ctc_logits.permute(1, 0, 2)
-            ctc_labels_flat = texts.contiguous().view(-1)
+            
+            # CTC Loss
+            ctc_log_probs = ctc_logits.permute(1, 0, 2)  # (T, B, vocab_size)
+
+            # Fix CTC targets: Concatenate unpadded sequences
+            ctc_labels = []
+            for b in range(texts.size(0)):  # B
+                unpadded = texts[b, :text_lengths[b]]
+                ctc_labels.append(unpadded)
+            ctc_labels_flat = torch.cat(ctc_labels)  # Concatenate into 1D tensor
+
             ctc_input_lengths = [int(f) for f in frame_lengths]
             ctc_label_lengths = [int(l) for l in text_lengths]
+
+            # Debug print to verify
+            print(f"[Validation] Batch {batch_idx}:")
+            print(f"texts shape: {texts.shape}")
+            print(f"ctc_labels_flat size: {ctc_labels_flat.size(0)}")
+            print(f"Sum of text_lengths: {sum(ctc_label_lengths)}")
+            print(f"ctc_input_lengths: {ctc_input_lengths}")
+            print(f"ctc_label_lengths: {ctc_label_lengths}")
+
             loss_ctc = F.ctc_loss(
                 ctc_log_probs,
                 ctc_labels_flat,
                 ctc_input_lengths,
                 ctc_label_lengths,
-                blank=0,
+                blank=vocab.token_to_id("sil"),  # Match training
                 reduction='mean',
                 zero_infinity=True
             )
 
-            # attn
+            # Attention Loss
             B, Lm1, V = attn_logits.shape
             attn_logits_2d = attn_logits.view(-1, V)
             attn_target_2d = decoder_target.reshape(-1)
             loss_attn = F.cross_entropy(attn_logits_2d, attn_target_2d, ignore_index=pad_id)
 
             # Combine
-            loss = cfg.alpha_ctc * loss_ctc + (1 - cfg.alpha_ctc) * loss_attn
-            total_loss += loss.item()
-            total_ctc_loss += loss_ctc.item()
-            total_attn_loss += loss_attn.item()
-
-    avg_loss = total_loss / len(val_loader)
-    avg_ctc = total_ctc_loss / len(val_loader)
-    avg_attn = total_attn_loss / len(val_loader)
-    return avg_loss, avg_ctc, avg_attn
+            loss = cfg.alpha_ctc * loss_ctc + (1 - cfg.alpha_ct
 
 
 ###############################################################################
