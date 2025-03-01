@@ -17,8 +17,8 @@ from src.data.data_loader import gather_all_speakers_data, load_vocab_from_json
 class TrainConfig:
     # Data
     base_path = "data"
-    speaker_ids = ["s1"]
-    batch_size = 2
+    speaker_ids = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10"]
+    batch_size = 4
     num_workers = 0  # >0 if you want multiprocessing in data loading
 
     # Model / Architecture
@@ -62,6 +62,10 @@ def train_lipreading_model(resume_checkpoint=None):
     vocab = load_vocab_from_json(vocab_json_path)
     vocab_size = len(vocab)
     print(f"Loaded vocab of size: {vocab_size} (including special tokens)")
+    # print("Final vocab size =", len(vocab))
+    # for token, idx in vocab.stoi.items():
+    #     print(f"{token} => {idx}")
+
 
 
     # -------------------------------------------------------------------------
@@ -76,7 +80,14 @@ def train_lipreading_model(resume_checkpoint=None):
         num_workers=cfg.num_workers
     )
 
-    val_loader = None  # or define a separate gather_all_speakers_data(...) for validation
+    val_loader = gather_all_speakers_data(
+        speaker_ids=cfg.speaker_ids,
+        base_path=cfg.base_path,
+        vocab=vocab,
+        batch_size=cfg.batch_size,
+        shuffle=True,
+        num_workers=cfg.num_workers
+    )
 
     # -------------------------------------------------------------------------
     # 2.3 Initialize Model
@@ -86,8 +97,8 @@ def train_lipreading_model(resume_checkpoint=None):
         vocab_size=vocab_size,        # for the attention decoder
         hidden_dim=cfg.d_model,
         nhead=cfg.nhead,
-        num_layers=cfg.num_encoder_layers,  # or separate if encoder/decoder differ
-        alpha=cfg.alpha_ctc           # If your model itself needs alpha; otherwise keep it here
+        num_encoder_layers=cfg.num_encoder_layers,  
+        num_decoder_layers=cfg.num_decoder_layers
     )
     model = model.to(cfg.device)
 
@@ -168,18 +179,12 @@ def train_lipreading_model(resume_checkpoint=None):
             # a) Permute ctc_logits to (T, B, C) for PyTorch ctc_loss
             ctc_log_probs = ctc_logits.permute(1, 0, 2)  # (T, B, vocab_size)
 
-            # b) Flatten out the text for CTC
-            #    We assume each sample's text length is text_lengths[i].
-            #    input_lengths => frame_lengths
-            #    label_lengths => text_lengths
-            #    (If your texts contain <bos>/<eos>, you might do text_lengths[i]-1.)
-
-            # You can pass the entire 2D texts as 1D by flattening. But typically
-            # ctc_loss wants them in one 1D sequence. We'll do something minimal:
-            # We'll assume texts (B, L) is the "full transcript" w/o shift.
-            # If you do have <bos> or <eos>, you might want to remove them for CTC labeling.
-            ctc_labels = texts  # shape (B, L)
-            ctc_labels_flat = ctc_labels.contiguous().view(-1)  # (B*L,)
+            ctc_labels = []
+            for b in range(B):
+                # Take only the unpadded portion of each sequence
+                unpadded = texts[b, :text_lengths[b]]
+                ctc_labels.append(unpadded)
+            ctc_labels_flat = torch.cat(ctc_labels)  # Concatenate into 1D tensor
 
             # ctc_input_lengths = frame_lengths
             # ctc_label_lengths = text_lengths
@@ -188,12 +193,11 @@ def train_lipreading_model(resume_checkpoint=None):
             ctc_label_lengths = [int(l) for l in text_lengths]
 
             #Debug 
-            print("ctc_log_probs.shape =", ctc_log_probs.shape)  # (T, B, C)
-            print("labels_flat.shape =", ctc_labels_flat.shape)       # should match sum of label_lengths
-            print("frame_lengths =", frame_lengths)
-            print("label_lengths =", ctc_label_lengths)
-            print("sum(frame_lengths) =", sum(frame_lengths))
-            print("sum(label_lengths) =", sum(ctc_label_lengths))
+            # print("ctc_log_probs:", ctc_log_probs.shape)
+            # print("ctc_labels_flat:", ctc_labels_flat.shape, ctc_labels_flat[:50])
+            # print("frame_lengths:", frame_lengths)
+            # print("text_lengths:", text_lengths)
+
 
             # c) Compute ctc_loss
             # By default, blank=0. Ensure that your vocab[0] is <blank>, or set blank=some_index.

@@ -9,10 +9,4 @@ tensorflow
 torch
 torchvision
 torchaudio
-mediapipe
 transformers
-librosa
-spacy
-sentencepiece
-tqdm
-pydub

@@ -41,7 +41,8 @@ class LipReading3DTransformer(nn.Module):
                                                    nhead=nhead,
                                                    dim_feedforward=dim_feedforward,
                                                    dropout=dropout,
-                                                   activation="relu")
+                                                   activation="relu",
+                                                   batch_first=True)
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
         
         # 5) Token embedding for decoder input (text)

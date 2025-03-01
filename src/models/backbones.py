@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 import torch.nn.functional as F
+from torchvision.models import ResNet18_Weights
 
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torch.nn import TransformerDecoder, TransformerDecoderLayer
@@ -14,7 +15,7 @@ class LipReadingModel(nn.Module):
         self.hidden_dim = hidden_dim
 
         # 1) Pretrained ResNet for feature extraction (2D)
-        self.cnn = models.resnet18(pretrained=True)
+        self.cnn = models.resnet18(weights=ResNet18_Weights.DEFAULT)
         self.cnn.fc = nn.Identity()  # remove classification layer -> output size 512
 
         # Project to desired hidden_dim
